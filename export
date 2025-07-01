@@ -1,0 +1,95 @@
+Option Explicit
+
+' Entry point: prompts you to pick a folder and a destination path,
+' then exports all mail items (recursively) as .msg files.
+Public Sub ExportMailFolderToMSG()
+    Dim objNS As Outlook.NameSpace
+    Dim sourceFolder As Outlook.MAPIFolder
+    Dim destRoot As String
+    
+    Set objNS = Application.GetNamespace("MAPI")
+    Set sourceFolder = objNS.PickFolder
+    If sourceFolder Is Nothing Then Exit Sub
+    
+    destRoot = InputBox( _
+        "Enter full path to destination root folder (e.g. C:\Archive):", _
+        "Destination Folder")
+    If destRoot = vbNullString Then Exit Sub
+    
+    ' Ensure root exists
+    If Dir(destRoot, vbDirectory) = vbNullString Then
+        On Error Resume Next
+        MkDir destRoot
+        On Error GoTo 0
+    End If
+    
+    ' Start recursive export
+    ExportFolder sourceFolder, destRoot
+    MsgBox "Export complete.", vbInformation
+End Sub
+
+' Recursively export all MailItems in 'fld' into 'path'
+Private Sub ExportFolder(ByVal fld As Outlook.MAPIFolder, ByVal path As String)
+    Dim itm As Object
+    Dim mail As Outlook.MailItem
+    Dim subPath As String
+    
+    ' Create a subfolder named after the Outlook folder
+    subPath = path & "\" & SanitizeFileName(fld.Name)
+    If Dir(subPath, vbDirectory) = vbNullString Then
+        On Error Resume Next
+        MkDir subPath
+        On Error GoTo 0
+    End If
+    
+    ' Export each MailItem
+    For Each itm In fld.Items
+        If TypeOf itm Is Outlook.MailItem Then
+            Set mail = itm
+            SaveMailAsMSG mail, subPath
+        End If
+    Next
+    
+    ' Recurse into subfolders
+    Dim subFld As Outlook.MAPIFolder
+    For Each subFld In fld.Folders
+        ExportFolder subFld, subPath
+    Next
+End Sub
+
+' Save a single MailItem as .msg with a filesystem-safe name
+Private Sub SaveMailAsMSG(ByVal mail As Outlook.MailItem, ByVal folderPath As String)
+    Dim baseName As String
+    Dim fileName As String
+    
+    baseName = mail.EntryID & "_" & mail.Subject
+    baseName = SanitizeFileName(baseName)
+    
+    ' Truncate to leave room for ".msg" (max 128 chars total)
+    If Len(baseName) > 124 Then
+        baseName = Left(baseName, 124)
+    End If
+    
+    fileName = folderPath & "\" & baseName & ".msg"
+    
+    On Error Resume Next
+    mail.SaveAs fileName, olMSG
+    On Error GoTo 0
+End Sub
+
+' Replace invalid filename chars with underscore
+Private Function SanitizeFileName(name As String) As String
+    Dim invalidChars As String
+    Dim i As Integer
+    
+    invalidChars = "/\[]:;=,+" & Chr(34) & "*?<>|"
+    For i = 1 To Len(invalidChars)
+        name = Replace(name, Mid$(invalidChars, i, 1), "_")
+    Next
+    ' Also remove control chars
+    Dim c As Integer
+    For c = 0 To 31
+        name = Replace(name, Chr(c), "_")
+    Next
+    SanitizeFileName = name
+End Function
